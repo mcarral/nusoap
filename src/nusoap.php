@@ -3553,19 +3553,12 @@ class soap_transport_http extends nusoap_base
 class nusoap_server extends nusoap_base
 {
     /**
-     * Indicate the framework that is used
+     * Closure for resolve class method call
      *
-     * @var string
+     * @var Closure
      * @access public
      */
-    var $framework = "";
-    /**
-     * Routes of the classes in the framework
-     *
-     * @var string
-     * @access public
-     */
-    var $route_class = "";
+    static $resolve_method;
     /**
      * HTTP headers of request
      *
@@ -4117,33 +4110,8 @@ class nusoap_server extends nusoap_base
         }
         $this->debug("in invoke_method, delim=$delim");
 
-        $class = '';
-        $method = '';
-        if ($this->framework === ""){
-            if (strlen($delim) > 0 && substr_count($this->methodname, $delim) == 1) {
-                $try_class = substr($this->methodname, 0, strpos($this->methodname, $delim));
-                if (class_exists($try_class)) {
-                    // get the class and method name
-                    $class = $try_class;
-                    $method = substr($this->methodname, strpos($this->methodname, $delim) + strlen($delim));
-                    $this->debug("in invoke_method, class=$class method=$method delim=$delim");
-                } else {
-                    $this->debug("in invoke_method, class=$try_class not found");
-                }
-            } elseif (strlen($delim) > 0 && substr_count($this->methodname, $delim) > 1) {
-                $split = explode($delim, $this->methodname);
-                $method = array_pop($split);
-                $class = implode('\\', $split);
-            } else {
-                $try_class = '';
-                $this->debug("in invoke_method, no class to try");
-            }
-        } else if ($this->framework === "laravel"){
-            $try_class          = substr($this->methodname, 0, strpos($this->methodname, $delim));
-            $new_route_class    = $this->route_class."\\".$try_class;
-            $class              =  new  $new_route_class;
-            $method             = substr($this->methodname, strpos($this->methodname, $delim) + strlen($delim));
-        }
+        $resolver = static::$resolve_method;
+        list($class, $method, $try_class) = ($resolver instanceof Closure) ? $resolver($this) : $this->resolve_method();
 
         // does method exist?
         if ($class == '') {
@@ -4228,6 +4196,44 @@ class nusoap_server extends nusoap_base
         $this->debug('in invoke_method, methodreturn:');
         $this->appendDebug($this->varDump($this->methodreturn));
         $this->debug("in invoke_method, called method $this->methodname, received data of type " . gettype($this->methodreturn));
+    }
+
+    function resolve_method() {
+        // if a . is present in $this->methodname, we see if there is a class in scope,
+        // which could be referred to. We will also distinguish between two deliminators,
+        // to allow methods to be called a the class or an instance
+        if (strpos($this->methodname, '..') > 0) {
+            $delim = '..';
+        } elseif (strpos($this->methodname, '.') > 0) {
+            $delim = '.';
+        } else {
+            $delim = '';
+        }
+        $this->debug("in invoke_method, delim=$delim");
+
+        $class = '';
+        $method = '';
+        $try_class = '';
+        if (strlen($delim) > 0 && substr_count($this->methodname, $delim) == 1) {
+            $try_class = substr($this->methodname, 0, strpos($this->methodname, $delim));
+            if (class_exists($try_class)) {
+                // get the class and method name
+                $class = $try_class;
+                $method = substr($this->methodname, strpos($this->methodname, $delim) + strlen($delim));
+                $this->debug("in invoke_method, class=$class method=$method delim=$delim");
+            } else {
+                $this->debug("in invoke_method, class=$try_class not found");
+            }
+        } elseif (strlen($delim) > 0 && substr_count($this->methodname, $delim) > 1) {
+            $split = explode($delim, $this->methodname);
+            $method = array_pop($split);
+            $class = implode('\\', $split);
+        } else {
+            $try_class = '';
+            $this->debug("in invoke_method, no class to try");
+        }
+
+        return array($class, $method, $try_class);
     }
 
     /**
